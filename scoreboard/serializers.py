@@ -19,12 +19,14 @@ class PointSerializer(serializers.ModelSerializer):
     class Meta:
         model = Point
         fields = ['player', 'score']
+        # depth=1
 
 
 class GameSerializer(serializers.ModelSerializer):
     class Meta:
         model = Game
         fields = ['player', 'set', 'games_won']
+        # depth=1
 
 
 class MatchStatusSerializer(serializers.ModelSerializer):

@@ -1,5 +1,7 @@
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models.signals import m2m_changed, post_save
+from django.dispatch import receiver
 
 
 class SetChoice(models.IntegerChoices):
@@ -65,3 +67,18 @@ class Game(models.Model):
 
     def __str__(self):
         return f'Game ({self.pk})'
+
+
+@receiver(post_save, sender=Match)
+def init_match_status(sender, instance, **kwargs):
+    # Create match status record
+    MatchStatus.objects.create(match=instance, current_set=1)
+
+
+def match_players_added(sender, instance, action, **kwargs):
+    if action == 'post_add':
+        for player in instance.players.all():
+            Point.objects.create(match=instance, player=player, score=0)
+
+
+m2m_changed.connect(match_players_added, sender=Match.players.through)
