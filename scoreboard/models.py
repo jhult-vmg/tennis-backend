@@ -34,7 +34,7 @@ class MatchStatus(models.Model):
     )
     tiebreaker_active = models.BooleanField(default=False)
     winner = models.ForeignKey(Player, on_delete=models.PROTECT, null=True)
-    latest_event = models.CharField(max_length=120, null=True, blank=True)
+    latest_event = models.CharField(default='Match Started', max_length=120, null=True, blank=True)
 
     def __str__(self):
         return f'MatchStatus ({self.pk})'
@@ -46,7 +46,7 @@ class Point(models.Model):
     score = models.PositiveIntegerField(
         validators=[
             MinValueValidator(0, 'Love is the least expected minimum'),
-            MaxValueValidator(4, 'Score cannot exceed 5')
+            MaxValueValidator(4, 'Score cannot exceed 4')
         ]
     )
 
@@ -76,6 +76,7 @@ def init_match_status(sender, instance, **kwargs):
 
 
 def match_players_added(sender, instance, action, **kwargs):
+    # Initialize points record for players
     if action == 'post_add':
         for player in instance.players.all():
             Point.objects.create(match=instance, player=player, score=0)

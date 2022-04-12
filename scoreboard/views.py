@@ -1,5 +1,5 @@
 from django.db.models import Sum
-from rest_framework import exceptions, generics, viewsets
+from rest_framework import exceptions, generics, mixins, viewsets
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
@@ -90,7 +90,7 @@ class PointUpdateView(generics.GenericAPIView):
         """
         Update player score based last serve outcome
         """
-        match = self.get_match()
+        match = self.match
         return Point.objects.filter(match=match, player=player).update(score=new_score)
 
     def get_or_create_game(self, match, player, set):
@@ -106,7 +106,7 @@ class PointUpdateView(generics.GenericAPIView):
         """
         Initialize Game win record for players
         """
-        match = self.get_match()
+        match = self.match
         match_status = self.get_match_status()
         player, opponent = self.get_match_players(match)
         self.get_or_create_game(match, player, match_status.current_set)
@@ -116,7 +116,7 @@ class PointUpdateView(generics.GenericAPIView):
         """
         Update player games won
         """
-        match = self.get_match()
+        match = self.match
         match_status = self.get_match_status()
 
         try:
@@ -157,7 +157,7 @@ class PointUpdateView(generics.GenericAPIView):
         match_status.latest_event = message
         match_status.save()
 
-    def put(self, request, *args, **kwargs):
+    def post(self, request, *args, **kwargs):
         """
         Process match progress by processing each score made by a player
         The point system assumed is as follows:
@@ -170,9 +170,9 @@ class PointUpdateView(generics.GenericAPIView):
             Server wins deuce point = Ad-In
             Receiver wins deuce point = Ad-Out
         """
-        match = self.get_match()
+        self.match = self.get_match()
         match_status = self.get_match_status()
-        player, opponent = self.get_match_players(match)
+        self.player, opponent = self.get_match_players(self.match)
         self.init_game()
 
         # Read previous scores of the players
@@ -180,6 +180,7 @@ class PointUpdateView(generics.GenericAPIView):
         opponent_score = self.get_opponent_score().score
 
         # Look for Ad-Out
+        MIN_SCORE_FOR_WIN = 4
         DUECE_SCORE = 3
         AD_IN_SCORE = 4
         ad_out = player_score_previous == DUECE_SCORE and opponent_score == AD_IN_SCORE
@@ -192,55 +193,79 @@ class PointUpdateView(generics.GenericAPIView):
             # Add point to prev score
             player_score_now = player_score_previous + 1
 
-        # Draw game winner - Is player ahead four points ?
-        ahead_four_points = player_score_now == 5
+        # Draw game winner - Is player ahead four points or wins AdIn score ?
+        duece_active = player_score_previous == DUECE_SCORE and opponent_score == DUECE_SCORE
+        ahead_four_points = not duece_active and player_score_now == MIN_SCORE_FOR_WIN
+        score_2adin_points = opponent_score == DUECE_SCORE and player_score_now > MIN_SCORE_FOR_WIN
 
-        if ahead_four_points:
-            self.game_won(player)  # Player won the game
-            self.announce_event(f'{player.name} won the game')
+        if ahead_four_points or score_2adin_points:
+            self.game_won(self.player)  # Player won the game
+            self.announce_event(f'{self.player.name} won the game')
             self.reset_score()
 
             # Find games won in current set for player and opponent
             player_games_won_currentset = Game.objects.get(
-                    match=match, player=player, set=match_status.current_set
+                    match=self.match, player=self.player, set=match_status.current_set
                 ).games_won
 
             opponent_games_won_currentset = Game.objects.get(
-                    match=match, player=opponent, set=match_status.current_set
+                    match=self.match, player=opponent, set=match_status.current_set
                 ).games_won
 
             # Advantage set rule
-            """
-            In an advantage set, a player or team needs to win six games, by two, to win the set.
-            This means that there is no tiebreak game played at 6-6.
-            The set continues until one player/team wins by two games.
-            """
+
+            # In an advantage set, a player or team needs to win six games, by two, to win the set.
+            # This means that there is no tiebreak game played at 6-6.
+            # The set continues until one player/team wins by two games.
 
             player_won_set = player_games_won_currentset >= 6 \
                 and player_games_won_currentset - opponent_games_won_currentset >= 2
             if player_won_set:
                 # player won set, move to next set
-                if match_status.current_set < match.sets:
+                if match_status.current_set < self.match.sets:
                     self.next_set()
                 else:
                     # All sets finished, now draw match
 
                     # Find games won in All sets for the player and opponent
                     player_games_won_allsets = Game.objects.filter(
-                            match=match, player=player
+                            match=self.match, player=self.player
                         ).aggregate(Sum('games_won'))['games_won__sum']
 
                     opponent_games_won_allsets = Game.objects.filter(
-                            match=match, player=opponent
+                            match=self.match, player=opponent
                         ).aggregate(Sum('games_won'))['games_won__sum']
 
-                    winner = player if player_games_won_allsets > opponent_games_won_allsets else opponent
+                    winner = self.player if player_games_won_allsets > opponent_games_won_allsets else opponent
                     self.match_won(winner)
                     self.announce_event(f'{winner.name} won the match!')
 
         else:
             # Update player score, game continues
-            self.update_player_score(player, player_score_now)
-            self.announce_event(f'{player.name} scored the point')
+            self.update_player_score(self.player, player_score_now)
+            self.announce_event(f'{self.player.name} scored the point')
 
         return Response({'success': True}, status=200)
+
+
+class ScoreCorrectionView(generics.GenericAPIView, mixins.UpdateModelMixin):
+    """
+    Provides manual update of the score in case of corrections
+    """
+
+    queryset = Point.objects.all()
+    serializer_class = PointSerializer
+    lookup_fields = ('match', 'player')
+
+    def get_object(self):
+        queryset = self.get_queryset()
+        filter = {}
+        for field in self.lookup_fields:
+            filter[field] = self.kwargs[field]
+
+        obj = get_object_or_404(queryset, **filter)
+        self.check_object_permissions(self.request, obj)
+        return obj
+
+    def put(self, request, *args, **kwargs):
+        return self.partial_update(request, *args, **kwargs)

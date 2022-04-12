@@ -15,8 +15,18 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include, path
+from django.views.generic import TemplateView
+from rest_framework.schemas import get_schema_view
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('scoreboard/', include('scoreboard.urls')),
+    path('openapi/', get_schema_view(
+        title="Tennis Scoreboard",
+        description="API Documentation"
+    ), name='openapi-schema'),
+    path('docs/', TemplateView.as_view(
+        template_name='documentation.html',
+        extra_context={'schema_url': 'openapi-schema'}
+    ), name='swagger-ui'),
 ]
