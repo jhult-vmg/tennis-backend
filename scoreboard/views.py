@@ -91,7 +91,9 @@ class PointUpdateView(generics.GenericAPIView):
         Update player score based last serve outcome
         """
         match = self.match
-        return Point.objects.filter(match=match, player=player).update(score=new_score)
+        point_obj = Point.objects.filter(match=match, player=player).get()
+        point_obj.score=new_score
+        point_obj.save()
 
     def get_or_create_game(self, match, player, set):
         """

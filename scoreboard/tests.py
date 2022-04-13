@@ -8,6 +8,7 @@ class MatchTestCase(TestCase):
     def setUp(self):
         self.player1 = Player.objects.create(name='Player1')
         self.player2 = Player.objects.create(name='Player2')
+        self.player3 = Player.objects.create(name='Player3')
         self.match1 = Match.objects.create(players=[self.player1, self.player2])
 
     def test_create_match(self):
@@ -31,3 +32,27 @@ class MatchTestCase(TestCase):
         data = {'success': True}
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertResponseOk(response, contains=data)
+
+    def test_add_invalid_players(self):
+        data = {
+            'sets': 3,
+            'players': [self.player1.id, self.player2.id, self.player3.id],
+        }
+        response = self.client.post(
+            '/scoreboard/matches/',
+            format='json',
+            data=data,
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+
+    def test_add_invalid_sets(self):
+        data = {
+            'sets': 10,
+            'players': [self.player1.id, self.player2.id, ],
+        }
+        response = self.client.post(
+            '/scoreboard/matches/',
+            format='json',
+            data=data,
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)

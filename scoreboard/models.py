@@ -1,7 +1,9 @@
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models.signals import m2m_changed, post_save
 from django.dispatch import receiver
+from rest_framework import serializers
 
 
 class SetChoice(models.IntegerChoices):
@@ -50,8 +52,24 @@ class Point(models.Model):
         ]
     )
 
+    class Meta:
+        unique_together = ('match', 'player')
+
     def __str__(self):
         return f'Point ({self.pk})'
+
+    def save(self, *args, **kwargs):
+        if self.player not in self.match.players.all():
+            raise ValidationError('Player does not belong to the match!')
+        try:
+            match_status = MatchStatus.objects.get(match_id=self.match)
+        except MatchStatus.DoesNotExist:
+            # on creating new match
+            match_status = None
+        if match_status and match_status.winner:
+            raise ValidationError('Cannot add point. Match is finished already!')
+
+        super(Point, self).save(*args, **kwargs)
 
 
 class Game(models.Model):
@@ -65,6 +83,9 @@ class Game(models.Model):
     )
     games_won = models.PositiveIntegerField()
 
+    class Meta:
+        unique_together = ('match', 'player', 'set')
+
     def __str__(self):
         return f'Game ({self.pk})'
 
@@ -76,8 +97,16 @@ def init_match_status(sender, instance, **kwargs):
 
 
 def match_players_added(sender, instance, action, **kwargs):
-    # Initialize points record for players
+    # Validate player count
+    if action == 'pre_add':
+        no_players = len(kwargs['pk_set'])
+        if no_players != 2:
+            raise serializers.ValidationError({
+                'players': 'Invalid number of players. Two players(teams) are required!'
+            })
+
     if action == 'post_add':
+        # Initialize points record for players
         for player in instance.players.all():
             Point.objects.create(match=instance, player=player, score=0)
 

@@ -32,5 +32,3 @@ python3 manage.py runserver
 ### API Docs
 
 http://localhost:8000/docs/
-
-### Install requirements
